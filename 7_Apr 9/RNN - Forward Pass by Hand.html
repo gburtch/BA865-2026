@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RNN Forward Pass by Hand — BA 865</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── TOKENS ── */
+:root{
+  --bg:#f0f4f8;
+  --surface:#fff;
+  --border:#e2e8f0;
+  --text:#0f172a;
+  --muted:#64748b;
+  --faint:#94a3b8;
+  --blue:#2563eb;
+  --violet:#7c3aed;
+  --green:#059669;
+  --amber:#d97706;
+  --red:#dc2626;
+  --shadow:0 1px 4px rgba(15,23,42,.06),0 3px 14px rgba(15,23,42,.05);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:15px}
+body{
+  font-family:'Inter',system-ui,sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;overflow:hidden;
+}
+code{font-family:'JetBrains Mono',monospace}
+
+/* ── SLIDE CHROME ── */
+#chrome{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  box-shadow:0 1px 10px rgba(15,23,42,.07);
+  height:52px;display:flex;align-items:center;padding:0 28px;gap:16px;
+}
+#chrome::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,#2563eb,#7c3aed,#059669);
+}
+#slide-title{
+  font-weight:700;font-size:.95rem;color:var(--text);letter-spacing:-.01em;flex:1;
+}
+#slide-num{
+  font-family:'JetBrains Mono',monospace;font-size:.8rem;
+  padding:3px 12px;border-radius:20px;
+  background:#f1f5f9;border:1px solid var(--border);
+  color:var(--muted);font-weight:600;white-space:nowrap;
+}
+.ctrl-btn{
+  padding:5px 16px;border-radius:7px;border:1px solid var(--border);
+  background:var(--surface);color:#334155;
+  font-family:'Inter',sans-serif;font-size:.82rem;font-weight:500;
+  cursor:pointer;transition:all .12s;
+}
+.ctrl-btn:hover{background:#f8fafc;border-color:#94a3b8}
+.ctrl-btn.primary{
+  background:linear-gradient(135deg,#2563eb,#4f46e5);
+  color:#fff;border-color:transparent;
+  box-shadow:0 2px 8px rgba(37,99,235,.3);
+}
+.ctrl-btn.primary:hover{filter:brightness(1.07)}
+.ctrl-btn:disabled{opacity:.35;pointer-events:none}
+
+/* ── SLIDE AREA ── */
+#slides{
+  position:fixed;top:52px;left:0;right:0;bottom:0;
+  overflow-y:auto;
+}
+#slides::-webkit-scrollbar{width:5px}
+#slides::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+
+.slide{display:none;max-width:900px;margin:0 auto;padding:32px 40px 48px}
+.slide.active{display:block}
+
+/* ── SLIDE HEADER ── */
+.slide-h{
+  font-size:1.55rem;font-weight:800;letter-spacing:-.03em;
+  color:var(--text);margin-bottom:4px;line-height:1.2;
+}
+.slide-sub{
+  font-size:.875rem;color:var(--muted);line-height:1.6;
+  margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border);
+}
+.slide-sub strong{color:var(--text)}
+
+/* ── CARDS ── */
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;box-shadow:var(--shadow);
+  padding:20px 24px;margin-bottom:16px;
+}
+.card-lbl{
+  font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;
+}
+.card-lbl::before{content:'';width:3px;height:13px;border-radius:2px;flex-shrink:0;background:linear-gradient(180deg,#2563eb,#7c3aed)}
+
+/* ── MATH / MATRIX ── */
+.mat-wrap{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;vertical-align:middle}
+.mat{
+  display:inline-flex;flex-direction:column;gap:3px;
+  border-left:2.5px solid #334155;border-right:2.5px solid #334155;
+  padding:6px 10px;border-radius:1px;
+}
+.mat-r{display:flex;gap:18px;font-family:'JetBrains Mono',monospace;font-size:.88rem;white-space:nowrap}
+.mat-lbl{font-size:.7rem;font-weight:700;color:var(--muted);margin-bottom:4px}
+.eq-row{
+  font-family:'JetBrains Mono',monospace;font-size:.92rem;
+  color:var(--text);line-height:1.9;
+}
+.eq-row .sub{font-size:.72rem;color:var(--muted);font-style:italic}
+
+/* ── COLORED VALUES ── */
+.vb{color:#2563eb;font-weight:700}    /* blue: x input / W_x */
+.vv{color:#7c3aed;font-weight:700}   /* violet: W_h */
+.vg{color:#059669;font-weight:700}   /* green: result / h */
+.va{color:#d97706;font-weight:700}   /* amber */
+.vr{color:#dc2626;font-weight:700}   /* red */
+
+/* ── HIDDEN STATE PILLS ── */
+.hp{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:6px 16px;border-radius:20px;font-weight:700;
+  font-family:'JetBrains Mono',monospace;font-size:.82rem;flex-shrink:0;
+}
+.h0{background:#f8fafc;border:1.5px solid #94a3b8;color:#475569}
+.h1{background:#eff6ff;border:1.5px solid #3b82f6;color:#1d4ed8;box-shadow:0 1px 5px rgba(59,130,246,.18)}
+.h2{background:#f5f3ff;border:1.5px solid #7c3aed;color:#5b21b6;box-shadow:0 1px 5px rgba(124,58,237,.18)}
+.h3{background:#f0fdf4;border:1.5px solid #059669;color:#047857;box-shadow:0 1px 5px rgba(5,150,105,.18)}
+
+/* ── CALLOUTS ── */
+.note{padding:12px 16px;border-radius:0 10px 10px 0;font-size:.82rem;line-height:1.6;margin-top:14px}
+.note-blue{background:#eff6ff;border-left:4px solid #2563eb;border:1px solid #bfdbfe;border-left:4px solid #2563eb;color:#1e3a8a}
+.note-green{background:#f0fdf4;border:1px solid #86efac;border-left:4px solid #059669;color:#14532d}
+.note-amber{background:#fffbeb;border:1px solid #fde68a;border-left:4px solid #f59e0b;color:#78350f}
+.note-red{background:#fef2f2;border:1px solid #fecaca;border-left:4px solid #dc2626;color:#7f1d1d}
+
+/* ── COMPARISON TABLE ── */
+.tbl{width:100%;border-collapse:collapse;font-size:.84rem}
+.tbl th{padding:9px 14px;background:#f8fafc;border:1px solid var(--border);font-weight:700;color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;text-align:left}
+.tbl td{padding:10px 14px;border:1px solid var(--border);vertical-align:middle}
+.tbl tr:nth-child(even) td{background:#fafbfc}
+.tbl td:first-child{font-weight:700}
+
+/* ── UNROLLED DIAGRAM ── */
+.unroll{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:8px 0 4px}
+.ur-col{display:flex;flex-direction:column;align-items:center;gap:8px;flex-shrink:0}
+.ur-box{
+  width:78px;height:56px;border-radius:10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  font-family:'JetBrains Mono',monospace;font-size:.65rem;font-weight:700;
+}
+.ur-arr{width:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding-top:28px}
+.ur-arr-line{
+  flex:1;height:2px;position:relative;
+}
+.ur-lbl{font-size:.65rem;font-family:'JetBrains Mono',monospace;text-align:center;font-weight:600}
+.shared-badge{
+  font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  padding:2px 7px;border-radius:10px;background:#fef3c7;border:1px solid #fbbf24;color:#92400e;
+  white-space:nowrap;margin-top:2px;
+}
+.center-text{text-align:center;padding:10px 16px;font-weight:700;font-size:.88rem;border-radius:8px;margin-top:12px}
+
+/* ── LAYOUT HELPERS ── */
+.row{display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap}
+.col{display:flex;flex-direction:column;gap:10px}
+.num-row{display:flex;gap:8px;align-items:center;font-family:'JetBrains Mono',monospace;font-size:.88rem;flex-wrap:wrap}
+hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0}
+</style>
+</head>
+<body>
+
+<!-- Chrome -->
+<div id="chrome">
+  <div id="slide-title">RNN Forward Pass by Hand</div>
+  <div id="slide-num">1 / 8</div>
+  <button class="ctrl-btn" id="btn-prev" disabled>&larr; Prev</button>
+  <button class="ctrl-btn primary" id="btn-next">Next &rarr;</button>
+</div>
+
+<div id="slides">
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 1 — Motivation
+═══════════════════════════════════════════════════════════ -->
+<div class="slide active">
+  <div class="slide-h">We Are Going to Compute an RNN by Hand</div>
+  <div class="slide-sub">Nothing new is happening beyond what you already know from dense layers. <strong>An RNN is just a dense layer applied across time.</strong></div>
+
+  <div class="card">
+    <div class="card-lbl">The RNN update rule</div>
+    <div style="text-align:center;padding:12px 0">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:1.15rem;color:var(--text)">
+        h<sub>t</sub> = tanh( <span class="vb">W<sub>x</sub></span> x<sub>t</sub> &nbsp;+&nbsp; <span class="vv">W<sub>h</sub></span> h<sub>t−1</sub> )
+      </div>
+      <div style="margin-top:14px;display:flex;gap:28px;justify-content:center;flex-wrap:wrap;font-size:.82rem;color:var(--muted)">
+        <span><span class="vb">■</span> &nbsp;W<sub>x</sub> maps input x<sub>t</sub> → hidden</span>
+        <span><span class="vv">■</span> &nbsp;W<sub>h</sub> maps previous state h<sub>t−1</sub> → hidden</span>
+        <span><span class="vg">■</span> &nbsp;h<sub>t</sub> is both the output and the next state</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-lbl">Parameters we'll use &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none">x<sub>t</sub>, h<sub>t</sub> ∈ ℝ² &nbsp;(tiny so we can fit on a slide)</span></div>
+    <div class="row" style="align-items:flex-start;gap:32px">
+      <div>
+        <div class="mat-lbl" style="color:#2563eb">W<sub>x</sub></div>
+        <div class="mat">
+          <div class="mat-r"><span class="vb">1</span><span class="vb">−1</span></div>
+          <div class="mat-r"><span class="vb">0</span><span class="vb">1</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="mat-lbl" style="color:#7c3aed">W<sub>h</sub></div>
+        <div class="mat">
+          <div class="mat-r"><span class="vv">0.5</span><span class="vv">0</span></div>
+          <div class="mat-r"><span class="vv">0</span><span class="vv">0.5</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="mat-lbl">Input sequence</div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:4px">
+          <div style="text-align:center">
+            <div style="font-size:.68rem;color:#2563eb;font-weight:600;margin-bottom:3px">x₁</div>
+            <div class="mat"><div class="mat-r">1</div><div class="mat-r">2</div></div>
+          </div>
+          <span style="font-size:1rem;color:var(--faint);padding-top:10px">→</span>
+          <div style="text-align:center">
+            <div style="font-size:.68rem;color:#7c3aed;font-weight:600;margin-bottom:3px">x₂</div>
+            <div class="mat"><div class="mat-r">0</div><div class="mat-r">1</div></div>
+          </div>
+          <span style="font-size:1rem;color:var(--faint);padding-top:10px">→</span>
+          <div style="text-align:center">
+            <div style="font-size:.68rem;color:#059669;font-weight:600;margin-bottom:3px">x₃</div>
+            <div class="mat"><div class="mat-r">2</div><div class="mat-r">0</div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="mat-lbl">Init</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.86rem;margin-top:6px">h<sub>0</sub> = [0, 0]ᵀ</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-top:4px">zeros at t=0</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note note-blue"><strong>Plan:</strong> We'll do three time steps by hand, then reframe the result as a standard deep network.</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 2 — t=1
+═══════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-h">t = 1 &nbsp;·&nbsp; This Is Just a Dense Layer</div>
+  <div class="slide-sub">h<sub>0</sub> = 0, so W<sub>h</sub> h<sub>0</sub> = 0. The recurrent term vanishes. This step is <strong>identical to a standard dense layer forward pass.</strong></div>
+
+  <div class="card">
+    <div class="card-lbl">① Compute W<sub>x</sub> x<sub>1</sub></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="mat">
+        <div class="mat-r"><span class="vb">1</span><span class="vb">−1</span></div>
+        <div class="mat-r"><span class="vb">0</span><span class="vb">1</span></div>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">×</span>
+      <div class="mat"><div class="mat-r">1</div><div class="mat-r">2</div></div>
+      <span style="font-size:1.2rem;color:var(--muted);font-weight:700">=</span>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:var(--muted)">
+        <div>row 1: &nbsp;(<span class="vb">1</span>)(1) + (<span class="vb">−1</span>)(2) = −1</div>
+        <div>row 2: &nbsp;(<span class="vb">0</span>)(1) + (&nbsp;<span class="vb">1</span>)(2) = &nbsp;2</div>
+      </div>
+      <span style="font-size:1.2rem;color:var(--muted);font-weight:700">=</span>
+      <div class="mat"><div class="mat-r"><strong>−1</strong></div><div class="mat-r"><strong>2</strong></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-lbl">② W<sub>h</sub> h<sub>0</sub></div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:var(--muted)">
+      W<sub>h</sub> × [0, 0]ᵀ = [0, 0]ᵀ &nbsp;·&nbsp; <em>no contribution from the hidden state</em>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:#bfdbfe;background:linear-gradient(135deg,#fafcff,#eff6ff)">
+    <div class="card-lbl" style="color:#1d4ed8">③ Sum and apply tanh → h<sub>1</sub></div>
+    <div class="num-row">
+      <span>tanh( [−1, 2] + [0, 0] ) = tanh( [−1, 2] )</span>
+    </div>
+    <div style="margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:.88rem;color:var(--muted)">
+      <div>tanh(−1) ≈ <span class="vb">−0.76</span></div>
+      <div>tanh(&nbsp;2) ≈ <span class="vb">&nbsp;0.96</span></div>
+    </div>
+    <div style="margin-top:12px">
+      <span class="hp h1">h₁ = [−0.76, &nbsp;0.96]</span>
+    </div>
+  </div>
+
+  <div class="note note-blue"><strong>Key point:</strong> This is identical to a single dense layer — two inputs, matrix multiply, tanh. The recurrence hasn't done anything yet because h<sub>0</sub> = 0.</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 3 — t=2
+═══════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-h">t = 2 &nbsp;·&nbsp; The Recursion Appears</div>
+  <div class="slide-sub">Now h<sub>1</sub> ≠ 0. We carry it forward as the second input to the same layer. <strong>This is the only new ingredient RNNs add.</strong></div>
+
+  <div class="card">
+    <div class="card-lbl">① W<sub>x</sub> x<sub>2</sub></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="mat">
+        <div class="mat-r"><span class="vb">1</span><span class="vb">−1</span></div>
+        <div class="mat-r"><span class="vb">0</span><span class="vb">1</span></div>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">×</span>
+      <div class="mat"><div class="mat-r">0</div><div class="mat-r">1</div></div>
+      <span style="font-size:1.2rem;color:var(--muted);font-weight:700">=</span>
+      <div class="mat"><div class="mat-r"><strong>−1</strong></div><div class="mat-r"><strong>1</strong></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:#ddd6fe">
+    <div class="card-lbl">② W<sub>h</sub> h<sub>1</sub> &nbsp;·&nbsp; <span style="font-weight:400;text-transform:none">the memory contribution</span></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="mat">
+        <div class="mat-r"><span class="vv">0.5</span><span class="vv">0</span></div>
+        <div class="mat-r"><span class="vv">0</span><span class="vv">0.5</span></div>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">×</span>
+      <span class="hp h1">[−0.76, 0.96]</span>
+      <span style="font-size:1.2rem;color:var(--muted);font-weight:700">=</span>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.88rem;color:var(--muted)">
+        <div>0.5 × (−0.76) = <span class="vv">−0.38</span></div>
+        <div>0.5 × &nbsp;0.96 = <span class="vv">&nbsp;0.48</span></div>
+      </div>
+      <span style="font-size:1.2rem;color:var(--muted);font-weight:700">=</span>
+      <div class="mat"><div class="mat-r"><strong>−0.38</strong></div><div class="mat-r"><strong>0.48</strong></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:#ddd6fe;background:linear-gradient(135deg,#fafafe,#f5f3ff)">
+    <div class="card-lbl" style="color:#5b21b6">③ Sum and apply tanh → h<sub>2</sub></div>
+    <div class="num-row">
+      <span>[−1, 1] &nbsp;+&nbsp; [<span class="vv">−0.38, 0.48</span>] = [<strong>−1.38, 1.48</strong>]</span>
+    </div>
+    <div style="margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:.88rem;color:var(--muted)">
+      <div>tanh(−1.38) ≈ <span class="vv">−0.88</span></div>
+      <div>tanh(&nbsp;1.48) ≈ <span class="vv">&nbsp;0.90</span></div>
+    </div>
+    <div style="margin-top:12px">
+      <span class="hp h2">h₂ = [−0.88, &nbsp;0.90]</span>
+    </div>
+  </div>
+
+  <div class="note note-blue"><strong>The only difference from t=1:</strong> we added the memory term [<span class="vv">−0.38, 0.48</span>] from h<sub>1</sub>. Same layer. New input includes the past.</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 4 — t=3
+═══════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-h">t = 3 &nbsp;·&nbsp; One More Iteration</div>
+  <div class="slide-sub">Exactly the same procedure. h<sub>2</sub> carries forward. <strong>We are applying the same layer a third time.</strong></div>
+
+  <div class="card">
+    <div class="card-lbl">① W<sub>x</sub> x<sub>3</sub></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="mat">
+        <div class="mat-r"><span class="vb">1</span><span class="vb">−1</span></div>
+        <div class="mat-r"><span class="vb">0</span><span class="vb">1</span></div>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">×</span>
+      <div class="mat"><div class="mat-r">2</div><div class="mat-r">0</div></div>
+      <span style="font-size:1.2rem;color:var(--muted);font-weight:700">=</span>
+      <div class="mat"><div class="mat-r"><strong>2</strong></div><div class="mat-r"><strong>0</strong></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:#6ee7b7">
+    <div class="card-lbl">② W<sub>h</sub> h<sub>2</sub></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div class="mat">
+        <div class="mat-r"><span class="vv">0.5</span><span class="vv">0</span></div>
+        <div class="mat-r"><span class="vv">0</span><span class="vv">0.5</span></div>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">×</span>
+      <span class="hp h2">[−0.88, 0.90]</span>
+      <span style="font-size:1.2rem;color:var(--muted);font-weight:700">=</span>
+      <div class="mat"><div class="mat-r"><strong>−0.44</strong></div><div class="mat-r"><strong>0.45</strong></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="border-color:#6ee7b7;background:linear-gradient(135deg,#fafffe,#f0fdf4)">
+    <div class="card-lbl" style="color:#047857">③ Sum and apply tanh → h<sub>3</sub></div>
+    <div class="num-row">
+      <span>[2, 0] &nbsp;+&nbsp; [<span class="vv">−0.44, 0.45</span>] = [<strong>1.56, 0.45</strong>]</span>
+    </div>
+    <div style="margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:.88rem;color:var(--muted)">
+      <div>tanh(1.56) ≈ <span class="vg">0.92</span></div>
+      <div>tanh(0.45) ≈ <span class="vg">0.42</span></div>
+    </div>
+    <div style="margin-top:12px">
+      <span class="hp h3">h₃ = [0.92, &nbsp;0.42]</span>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="card" style="background:#f8fafc">
+    <div class="card-lbl">Hidden state timeline</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 0">
+      <div style="text-align:center">
+        <div style="font-size:.62rem;color:var(--faint);margin-bottom:4px">h₀ (init)</div>
+        <span class="hp h0">[0.00, 0.00]</span>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">→</span>
+      <div style="text-align:center">
+        <div style="font-size:.62rem;color:#3b82f6;margin-bottom:4px">h₁ (after x₁)</div>
+        <span class="hp h1">[−0.76, 0.96]</span>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">→</span>
+      <div style="text-align:center">
+        <div style="font-size:.62rem;color:#7c3aed;margin-bottom:4px">h₂ (after x₂)</div>
+        <span class="hp h2">[−0.88, 0.90]</span>
+      </div>
+      <span style="font-size:1.2rem;color:var(--faint)">→</span>
+      <div style="text-align:center">
+        <div style="font-size:.62rem;color:#059669;margin-bottom:4px">h₃ (after x₃)</div>
+        <span class="hp h3">[0.92, 0.42]</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="note note-green"><strong>Reframe:</strong> We just applied the same dense layer three times. The only twist is that part of the input at each step comes from the previous output. That's all an RNN is.</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 5 — Unrolled diagram
+═══════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-h">Unrolled — A 3-Layer Net With Shared Weights</div>
+  <div class="slide-sub">Draw the same computation as a feedforward graph. Three layers, but <strong>W<sub>x</sub> and W<sub>h</sub> are identical at every step.</strong> This is weight tying.</div>
+
+  <div class="card">
+    <div class="card-lbl">Unrolled computation graph</div>
+    <div class="unroll">
+
+      <!-- h0 -->
+      <div class="ur-col" style="min-width:72px">
+        <div style="height:32px"></div>
+        <div class="hp h0" style="font-size:.68rem;padding:4px 10px">h₀=[0,0]</div>
+        <div style="font-size:.62rem;color:var(--faint)">init</div>
+      </div>
+
+      <!-- arrow -->
+      <div class="ur-arr">
+        <div class="ur-arr-line" style="background:#94a3b8"></div>
+        <span style="font-size:.7rem;color:#94a3b8">▶</span>
+      </div>
+
+      <!-- t=1 -->
+      <div class="ur-col">
+        <div class="ur-lbl" style="color:#2563eb">x₁=[1,2]↓</div>
+        <div class="ur-box" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:2px solid #3b82f6">
+          <span style="color:#1d4ed8">W<sub>x</sub>, W<sub>h</sub></span>
+          <span style="color:#1d4ed8;font-size:.6rem">tanh</span>
+        </div>
+        <div class="shared-badge">shared W<sub>x</sub>, W<sub>h</sub></div>
+        <div class="hp h1" style="font-size:.68rem;padding:4px 10px">h₁</div>
+        <div class="ur-lbl" style="color:#3b82f6">[−.76,.96]</div>
+      </div>
+
+      <!-- arrow -->
+      <div class="ur-arr">
+        <div class="ur-arr-line" style="background:#3b82f6"></div>
+        <span style="font-size:.7rem;color:#3b82f6">▶</span>
+      </div>
+
+      <!-- t=2 -->
+      <div class="ur-col">
+        <div class="ur-lbl" style="color:#7c3aed">x₂=[0,1]↓</div>
+        <div class="ur-box" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:2px solid #7c3aed">
+          <span style="color:#5b21b6">W<sub>x</sub>, W<sub>h</sub></span>
+          <span style="color:#5b21b6;font-size:.6rem">tanh</span>
+        </div>
+        <div class="shared-badge">shared W<sub>x</sub>, W<sub>h</sub></div>
+        <div class="hp h2" style="font-size:.68rem;padding:4px 10px">h₂</div>
+        <div class="ur-lbl" style="color:#7c3aed">[−.88,.90]</div>
+      </div>
+
+      <!-- arrow -->
+      <div class="ur-arr">
+        <div class="ur-arr-line" style="background:#7c3aed"></div>
+        <span style="font-size:.7rem;color:#7c3aed">▶</span>
+      </div>
+
+      <!-- t=3 -->
+      <div class="ur-col">
+        <div class="ur-lbl" style="color:#059669">x₃=[2,0]↓</div>
+        <div class="ur-box" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:2px solid #059669">
+          <span style="color:#047857">W<sub>x</sub>, W<sub>h</sub></span>
+          <span style="color:#047857;font-size:.6rem">tanh</span>
+        </div>
+        <div class="shared-badge">shared W<sub>x</sub>, W<sub>h</sub></div>
+        <div class="hp h3" style="font-size:.68px;padding:4px 10px">h₃</div>
+        <div class="ur-lbl" style="color:#059669">[.92,.42]</div>
+      </div>
+
+    </div><!-- end unroll -->
+
+    <div class="center-text" style="background:#fefce8;border:1.5px solid #fbbf24;color:#92400e">
+      This is a 3-layer neural network with shared weights.
+    </div>
+  </div>
+
+  <div class="note note-blue">
+    <strong>Why shared weights matter:</strong> The same W<sub>x</sub>, W<sub>h</sub> is used at every time step — so gradients from <em>all</em> steps update the same parameters. This also means the network can handle sequences of any length without adding parameters.
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 6 — Training & vanishing gradients
+═══════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-h">Training &amp; Vanishing Gradients</div>
+  <div class="slide-sub">Backprop through an unrolled RNN is standard backprop through a deep network — but the layers are tied, and <strong>gradients must multiply by W<sub>h</sub> at every time step.</strong></div>
+
+  <div class="card">
+    <div class="card-lbl">How backpropagation through time works</div>
+    <div style="font-size:.88rem;color:var(--text);line-height:1.85">
+      <div>1. &nbsp;Loss depends on h₃ (or all hₜ, depending on the task).</div>
+      <div>2. &nbsp;To compute ∂L/∂W<sub>h</sub>, gradients flow backward through every time step.</div>
+      <div>3. &nbsp;Each backward pass multiplies the gradient by W<sub>h</sub> (approximately).</div>
+      <div>4. &nbsp;After T steps: <code style="font-size:.88rem;color:#dc2626">gradient ∝ W<sub>h</sub><sup>T</sup></code> — the same matrix raised to a power.</div>
+    </div>
+  </div>
+
+  <div class="row" style="gap:16px">
+    <div class="card" style="flex:1;min-width:220px;border-color:#fecaca">
+      <div class="card-lbl" style="color:#991b1b">λ &lt; 1 &nbsp;·&nbsp; Our W<sub>h</sub> has eigenvalue 0.5</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.92rem;margin-bottom:10px">
+        0.5<sup>T</sup> → 0 as T grows
+      </div>
+      <div style="font-size:.84rem;color:#7f1d1d;line-height:1.7">
+        Signals from early inputs shrink to near-zero. The model cannot learn long-range dependencies — it effectively forgets everything more than ~10–20 steps back.
+      </div>
+    </div>
+    <div class="card" style="flex:1;min-width:220px;border-color:#fdba74">
+      <div class="card-lbl" style="color:#9a3412">λ &gt; 1 &nbsp;·&nbsp; Exploding gradients</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.92rem;margin-bottom:10px">
+        λ<sup>T</sup> → ∞ as T grows
+      </div>
+      <div style="font-size:.84rem;color:#7c2d12;line-height:1.7">
+        Training becomes numerically unstable. Gradient clipping is a common workaround, but it doesn't fix the root cause.
+      </div>
+    </div>
+  </div>
+
+  <div class="note note-red"><strong>The practical consequence:</strong> A vanilla RNN trained on long sequences will essentially ignore everything more than ~20 steps back. It can't learn that a subject 50 words ago constrains the verb today. This is why vanilla RNNs underperform on real NLP tasks.</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 7 — LSTM gate idea
+═══════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-h">LSTM — One Idea Fixes the Problem</div>
+  <div class="slide-sub">LSTMs add <strong>gates</strong> — sigmoid outputs that decide how much of the past to preserve. Information can pass through time with much less shrinkage.</div>
+
+  <div class="card">
+    <div class="card-lbl">The forget gate</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;padding:10px 0;color:var(--text)">
+      f<sub>t</sub> = σ( W<sub>f</sub> x<sub>t</sub> + U<sub>f</sub> h<sub>t−1</sub> )
+    </div>
+    <div style="margin-top:8px;font-size:.84rem;color:var(--muted);line-height:1.85">
+      <div>· σ (sigmoid) squashes output to (0, 1)</div>
+      <div>· f<sub>t</sub> ≈ <strong>1</strong> &nbsp;→&nbsp; keep the past state</div>
+      <div>· f<sub>t</sub> ≈ <strong>0</strong> &nbsp;→&nbsp; forget the past state</div>
+      <div>· The gate is <em>learned</em> — the model discovers when to remember and when to forget</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-lbl">The cell state — the "memory highway"</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:.95rem;padding:8px 0">
+      c<sub>t</sub> = <span class="va">f<sub>t</sub></span> ⊙ c<sub>t−1</sub> + <span class="vg">i<sub>t</sub></span> ⊙ g<sub>t</sub>
+    </div>
+    <div style="font-size:.84rem;color:var(--muted);line-height:1.85;margin-top:8px">
+      <div><span class="va">f<sub>t</sub> ⊙ c<sub>t−1</sub></span> &nbsp;— how much of the old cell state to keep</div>
+      <div><span class="vg">i<sub>t</sub> ⊙ g<sub>t</sub></span> &nbsp;— how much new information to write</div>
+    </div>
+    <div class="note note-green" style="margin-top:12px">
+      When f<sub>t</sub> ≈ 1, c<sub>t</sub> ≈ c<sub>t−1</sub> — the gradient flows backward almost unchanged. That's the fix: the cell state is a highway that bypasses the repeated multiplication by W<sub>h</sub>.
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SLIDE 8 — The symmetry / summary
+═══════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-h">The Unifying Symmetry</div>
+  <div class="slide-sub"><strong>Dense layers, CNNs, and RNNs all do the same thing: apply a learned transformation, somewhere.</strong> RNNs apply it across time. Transformers remove the bottleneck.</div>
+
+  <div class="card">
+    <div class="card-lbl">Architecture comparison</div>
+    <table class="tbl">
+      <thead>
+        <tr><th>Architecture</th><th>Transformation</th><th>Shared across</th><th>Handles</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Dense layer</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:.82rem">W x + b</td>
+          <td>Nothing</td>
+          <td>Fixed-size vectors</td>
+        </tr>
+        <tr>
+          <td>CNN</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:.82rem">filter conv</td>
+          <td>Spatial positions</td>
+          <td>Images, local patterns</td>
+        </tr>
+        <tr>
+          <td>RNN</td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:.82rem">W<sub>x</sub> x<sub>t</sub> + W<sub>h</sub> h<sub>t−1</sub></td>
+          <td>Time steps</td>
+          <td>Variable-length sequences</td>
+        </tr>
+        <tr style="background:#eff6ff">
+          <td><strong>Transformer</strong></td>
+          <td style="font-family:'JetBrains Mono',monospace;font-size:.82rem">QKV attention</td>
+          <td>All position pairs</td>
+          <td>Long-range dependencies</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-lbl">What you can now say</div>
+    <div style="display:flex;flex-direction:column;gap:9px;font-size:.86rem;color:var(--text);line-height:1.6">
+      <div><span class="vb">①</span> &nbsp;An RNN is a dense layer applied across time, output looped back as input.</div>
+      <div><span class="vv">②</span> &nbsp;Weights are shared — W<sub>x</sub> and W<sub>h</sub> are the same at every step.</div>
+      <div><span class="vg">③</span> &nbsp;Unrolled, it's a deep network — training is standard backprop through time (BPTT).</div>
+      <div><span class="vr">④</span> &nbsp;Vanishing gradients arise because repeated multiplication by W<sub>h</sub> shrinks signals.</div>
+      <div><span class="va">⑤</span> &nbsp;LSTMs add gates so the cell state can pass through time without shrinkage.</div>
+      <div><span style="color:#475569;font-weight:700">⑥</span> &nbsp;Transformers remove the bottleneck entirely — attention looks directly at any past position.</div>
+    </div>
+  </div>
+</div>
+
+</div><!-- end #slides -->
+
+<script>
+const TOTAL = 8;
+let cur = 0;
+const titles = [
+  "RNN Forward Pass by Hand",
+  "t = 1 — This Is Just a Dense Layer",
+  "t = 2 — The Recursion Appears",
+  "t = 3 — One More Iteration",
+  "Unrolled — A 3-Layer Net With Shared Weights",
+  "Training & Vanishing Gradients",
+  "LSTM — One Idea Fixes the Problem",
+  "The Unifying Symmetry"
+];
+function go(n) {
+  document.querySelectorAll('.slide').forEach((s, i) => s.classList.toggle('active', i === n));
+  document.getElementById('slide-num').textContent = (n + 1) + ' / ' + TOTAL;
+  document.getElementById('chrome').querySelector('#btn-prev').disabled = n === 0;
+  document.getElementById('chrome').querySelector('#btn-next').disabled = n === TOTAL - 1;
+  document.getElementById('slides').scrollTop = 0;
+}
+document.getElementById('btn-prev').addEventListener('click', () => { if (cur > 0) go(--cur); });
+document.getElementById('btn-next').addEventListener('click', () => { if (cur < TOTAL-1) go(++cur); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); if (cur < TOTAL-1) go(++cur); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); if (cur > 0) go(--cur); }
+});
+</script>
+</body>
+</html>
